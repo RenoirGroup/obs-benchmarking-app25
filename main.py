@@ -151,10 +151,11 @@ def append_to_database(new_client_df, client_name):
 
 def get_ai_analysis(image_bytes, client_metrics, benchmark_metrics, client_name, benchmark_level):
     try:
-        if "OPENAI_API_KEY" not in st.secrets:
-            st.error("OpenAI API key not found. Please create a .streamlit/secrets.toml file and add your key.")
+        api_key = os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+        if not api_key:
+            st.error("OpenAI API key not found. Please set it in Render's Environment Variables or in a .streamlit/secrets.toml file.")
             return None
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        client = OpenAI(api_key=api_key)
         base64_image = base64.b64encode(image_bytes.read()).decode('utf-8')
         data_summary = "Client Data:\n" + client_metrics[['theme', 'avg_score']].to_string(index=False)
         data_summary += "\n\nBenchmark Data:\n" + benchmark_metrics[['theme', 'avg_score']].to_string(index=False)
@@ -508,63 +509,67 @@ def render_pareto_page():
 
 # Initialize session state
 if 'df_benchmark' not in st.session_state:
-    st.session_state.df_benchmark = load_benchmark_data()
+    st.session_state.df_benchmark = None
 
 # Sidebar Layout
 st.sidebar.image("Renoir-Logo-1.png", use_container_width=True)
 st.sidebar.header("Filters & Controls")
-df_benchmark = st.session_state.df_benchmark
 
-if df_benchmark is not None and not df_benchmark.empty:
-    company_list = ['All'] + sorted(df_benchmark['client_name'].unique())
-    selected_company = st.sidebar.selectbox("Benchmark Company:", company_list)
-    level_list = ['All'] + sorted(df_benchmark['level_name'].unique())
-    selected_level = st.sidebar.selectbox("Benchmark Level:", level_list)
+# Page Routing
+if st.session_state.df_benchmark is None:
+    st.info("Welcome to the OBS Benchmarking Platform.")
+    if st.button("Click to Load Benchmark Data", type="primary"):
+        with st.spinner("Loading benchmark data from the database..."):
+            st.session_state.df_benchmark = load_benchmark_data()
+            st.rerun() # Rerun the script to display the page
 else:
-    st.sidebar.warning("Could not load benchmark data.")
-    selected_company, selected_level = 'All', 'All'
-    
-st.sidebar.subheader("Upload New Client Data")
-client_name_input = st.sidebar.text_input("Enter New Client's Name:", st.session_state.get('client_name', ''))
-uploaded_file = st.sidebar.file_uploader("Upload Client Excel File:", type=["xlsx"])
-    
-if st.sidebar.button("Process & Generate Report", type="primary"):
-    if uploaded_file and client_name_input:
-        with st.spinner("Processing client data..."):
-            st.session_state.client_df = process_new_client_data(uploaded_file, client_name_input)
-            st.session_state.client_name = client_name_input
-            if 'ai_summary' in st.session_state: del st.session_state.ai_summary
-    elif not client_name_input:
-        st.sidebar.warning("Please enter a client name.")
+    df_benchmark = st.session_state.df_benchmark
+    if df_benchmark.empty:
+         st.error("Application cannot start. Failed to load benchmark data from database.")
     else:
-        st.sidebar.warning("Please upload a client Excel file.")
+        # This part is the same as your original code
+        company_list = ['All'] + sorted(df_benchmark['client_name'].unique())
+        selected_company = st.sidebar.selectbox("Benchmark Company:", company_list)
+        level_list = ['All'] + sorted(df_benchmark['level_name'].unique())
+        selected_level = st.sidebar.selectbox("Benchmark Level:", level_list)
+        
+        st.sidebar.subheader("Upload New Client Data")
+        client_name_input = st.sidebar.text_input("Enter New Client's Name:", st.session_state.get('client_name', ''))
+        uploaded_file = st.sidebar.file_uploader("Upload Client Excel File:", type=["xlsx"])
+            
+        if st.sidebar.button("Process & Generate Report", type="primary"):
+            if uploaded_file and client_name_input:
+                with st.spinner("Processing client data..."):
+                    st.session_state.client_df = process_new_client_data(uploaded_file, client_name_input)
+                    st.session_state.client_name = client_name_input
+                    if 'ai_summary' in st.session_state: del st.session_state.ai_summary
+            elif not client_name_input:
+                st.sidebar.warning("Please enter a client name.")
+            else:
+                st.sidebar.warning("Please upload a client Excel file.")
 
-st.sidebar.markdown("---")
-page_selection = st.sidebar.radio(
-    "Navigation",
-    ["Benchmark Analysis", "Client Demographics", "Pareto Analysis"]
-)
+        st.sidebar.markdown("---")
+        page_selection = st.sidebar.radio(
+            "Navigation",
+            ["Benchmark Analysis", "Client Demographics", "Pareto Analysis"]
+        )
 
-with st.sidebar.expander("Database Statistics", expanded=False):
-    stats = get_database_stats()
-    if stats:
-        st.metric("Total Clients in DB", stats['total_clients'])
-        st.metric("Total Respondents in DB", stats['total_respondents'])
-        for level, count in sorted(stats['level_counts'].items()):
-            st.write(f"- {level}: **{count}** respondents")
-    else:
-        st.write("Could not retrieve stats.")
+        with st.sidebar.expander("Database Statistics", expanded=False):
+            stats = get_database_stats()
+            if stats:
+                st.metric("Total Clients in DB", stats['total_clients'])
+                st.metric("Total Respondents in DB", stats['total_respondents'])
+                for level, count in sorted(stats['level_counts'].items()):
+                    st.write(f"- {level}: **{count}** respondents")
+            else:
+                st.write("Could not retrieve stats.")
 
-# --- Page Routing ---
-if df_benchmark is None or df_benchmark.empty:
-    st.error("Application cannot start. Failed to load benchmark data from database.")
-else:
-    if page_selection == "Benchmark Analysis":
-        render_benchmark_page(df_benchmark, selected_company, selected_level, client_name_input)
-    elif page_selection == "Client Demographics":
-        render_demographics_page()
-    elif page_selection == "Pareto Analysis":
-        render_pareto_page()
+        if page_selection == "Benchmark Analysis":
+            render_benchmark_page(df_benchmark, selected_company, selected_level, client_name_input)
+        elif page_selection == "Client Demographics":
+            render_demographics_page()
+        elif page_selection == "Pareto Analysis":
+            render_pareto_page()
 
 # --- Copyright Notice ---
 st.markdown("---")
