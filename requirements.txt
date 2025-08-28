@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+matplotlib
+SQLAlchemy
+psycopg2-binary
+openai
+plotly
+openpyxl
+streamlit-authenticator
+PyYAML
