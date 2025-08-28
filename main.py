@@ -612,7 +612,7 @@ else:
 st.markdown("---")
 st.text("""
 Organisational Behaviour Survey (OBS) Benchmarking Platform
-Copyright (c) May 10th 2025 Keith Symondson and the Renoir Group
+Copyright (c) August 28 2025 Keith Symondson and the Renoir Group
 
 This software, and the data it contains, is proprietary and confidential. Unauthorized copying of this file,
 via any medium, is strictly prohibited. All rights reserved. For internal use within the company only.
