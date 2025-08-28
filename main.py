@@ -308,21 +308,23 @@ def calculate_metrics(data):
 def create_benchmark_plot(benchmark_metrics, client_metrics=None, title="", client_name=None):
     fig, ax = plt.subplots(figsize=(14, 9))
     gradient = np.linspace(0, 1, 256).reshape(1, -1)
+    
     # Define the color transitions: Green down to 85%, then Yellow, then Red.
-# The numbers (0.0, 0.15, 1.0) correspond to the inverted score on the x-axis.
-# 0.0 = 100% score, 0.15 = 85% score, 1.0 = 0% score.
-cdict = {'red':   ((0.0,  0.0, 0.0),   # At 100% score (x=0), red is 0
-                   (0.15, 1.0, 1.0),  # At 85% score (x=0.15), red is 1 (starts yellow)
-                   (1.0,  1.0, 1.0)), # At 0% score (x=1), red is 1
+    # The numbers (0.0, 0.15, 1.0) correspond to the inverted score on the x-axis.
+    # 0.0 = 100% score, 0.15 = 85% score, 1.0 = 0% score.
+    cdict = {'red':   ((0.0,  0.0, 0.0),   # At 100% score (x=0), red is 0
+                       (0.15, 1.0, 1.0),  # At 85% score (x=0.15), red is 1 (starts yellow)
+                       (1.0,  1.0, 1.0)), # At 0% score (x=1), red is 1
 
-         'green': ((0.0,  1.0, 1.0),   # At 100% score (x=0), green is 1
-                   (0.15, 1.0, 1.0),  # At 85% score (x=0.15), green is 1 (starts yellow)
-                   (1.0,  0.0, 0.0)), # At 0% score (x=1), green is 0
+             'green': ((0.0,  1.0, 1.0),   # At 100% score (x=0), green is 1
+                       (0.15, 1.0, 1.0),  # At 85% score (x=0.15), green is 1 (starts yellow)
+                       (1.0,  0.0, 0.0)), # At 0% score (x=1), green is 0
 
-         'blue':  ((0.0,  0.0, 0.0),   # Blue is always 0
-                   (1.0,  0.0, 0.0))}
-custom_cmap = mcolors.LinearSegmentedColormap('custom_cmap', cdict)
-ax.imshow(gradient, aspect='auto', cmap=custom_cmap, extent=[0, 1, -0.5, len(theme_order)-0.5])
+             'blue':  ((0.0,  0.0, 0.0),   # Blue is always 0
+                       (1.0,  0.0, 0.0))}
+    custom_cmap = mcolors.LinearSegmentedColormap('custom_cmap', cdict)
+    ax.imshow(gradient, aspect='auto', cmap=custom_cmap, extent=[0, 1, -0.5, len(theme_order)-0.5])
+    
     y_pos = range(len(benchmark_metrics))
     x_benchmark = 1 - benchmark_metrics['avg_score']
     ax.plot(x_benchmark, y_pos, marker='s', color='black', label='Benchmark', markersize=8)
