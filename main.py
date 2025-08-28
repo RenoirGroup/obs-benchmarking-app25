@@ -78,14 +78,43 @@ def get_db_engine():
 @st.cache_data(ttl=3600)
 def load_benchmark_data():
     engine = get_db_engine()
-    if not engine: return pd.DataFrame()
+    if not engine:
+        return pd.DataFrame()
     try:
-        query = "SELECT c.client_name, sl.level_name, sr.respondent_id, ss.theme, sr.response, ss.correct_answer, ss.question_number FROM SurveyResponses sr JOIN SurveySummary ss ON sr.question_id = ss.question_id JOIN Clients c ON sr.client_id = c.client_id JOIN SurveyLevels sl ON sr.level_id = sl.level_id;"
+        # This new query performs all calculations inside the database
+        query = text("""
+            WITH RespondentScores AS (
+                SELECT
+                    sr.client_id,
+                    sr.level_id,
+                    sr.respondent_id,
+                    ss.theme,
+                    AVG((sr.response = ss.correct_answer)::INT) AS score
+                FROM SurveyResponses sr
+                JOIN SurveySummary ss ON sr.question_id = ss.question_id
+                GROUP BY sr.client_id, sr.level_id, sr.respondent_id, ss.theme
+            )
+            SELECT
+                c.client_name,
+                sl.level_name,
+                rs.respondent_id,
+                rs.theme,
+                rs.score
+            FROM RespondentScores rs
+            JOIN Clients c ON rs.client_id = c.client_id
+            JOIN SurveyLevels sl ON rs.level_id = sl.level_id;
+        """)
+        
         df = pd.read_sql_query(query, engine)
+        
+        # We still need to map the theme codes to names
         df['theme'] = df['theme'].map(theme_mapping_benchmark)
         df['category'] = df['theme'].map(category_mapping)
-        df['score'] = (df['response'] == df['correct_answer']).astype(int)
+        
+        # The 'score' is now pre-calculated, so the old line is removed.
+        # This dataframe is now much smaller and faster to process.
         return df
+
     except Exception as e:
         st.error(f"Failed to load benchmark data. Error: {e}")
         return pd.DataFrame()
@@ -263,11 +292,12 @@ def process_new_client_data(uploaded_file, client_name):
         return None
 
 def calculate_metrics(data):
-    respondent_scores = data.groupby(['respondent_id', 'theme'])['score'].mean().reset_index()
+    # This function is now simpler as it receives pre-aggregated data per respondent
     metrics = []
     for theme in theme_order:
-        theme_data = respondent_scores[respondent_scores['theme'] == theme]
+        theme_data = data[data['theme'] == theme]
         if theme_data.empty: continue
+        # The 'score' column is now the pre-calculated average for each respondent/theme
         avg_score = theme_data['score'].mean()
         std_dev = theme_data['score'].std()
         metrics.append({'theme': theme, 'category': category_mapping.get(theme, 'Unknown'), 'avg_score': avg_score, 'std_dev': std_dev if pd.notna(std_dev) else 0, 'num_respondents': theme_data['respondent_id'].nunique()})
@@ -511,9 +541,53 @@ def render_pareto_page():
 if 'df_benchmark' not in st.session_state:
     st.session_state.df_benchmark = None
 
-# Sidebar Layout
-st.sidebar.image("Renoir-Logo-1.png", use_container_width=True)
-st.sidebar.header("Filters & Controls")
+# Sidebar Layout is now conditional on data being loaded
+if st.session_state.df_benchmark is not None and not st.session_state.df_benchmark.empty:
+    st.sidebar.image("Renoir-Logo-1.png", use_container_width=True)
+    st.sidebar.header("Filters & Controls")
+    df_benchmark = st.session_state.df_benchmark
+
+    company_list = ['All'] + sorted(df_benchmark['client_name'].unique())
+    selected_company = st.sidebar.selectbox("Benchmark Company:", company_list)
+    level_list = ['All'] + sorted(df_benchmark['level_name'].unique())
+    selected_level = st.sidebar.selectbox("Benchmark Level:", level_list)
+    
+    st.sidebar.subheader("Upload New Client Data")
+    client_name_input = st.sidebar.text_input("Enter New Client's Name:", st.session_state.get('client_name', ''))
+    uploaded_file = st.sidebar.file_uploader("Upload Client Excel File:", type=["xlsx"])
+        
+    if st.sidebar.button("Process & Generate Report", type="primary"):
+        if uploaded_file and client_name_input:
+            with st.spinner("Processing client data..."):
+                st.session_state.client_df = process_new_client_data(uploaded_file, client_name_input)
+                st.session_state.client_name = client_name_input
+                if 'ai_summary' in st.session_state: del st.session_state.ai_summary
+        elif not client_name_input:
+            st.sidebar.warning("Please enter a client name.")
+        else:
+            st.sidebar.warning("Please upload a client Excel file.")
+
+    st.sidebar.markdown("---")
+    page_selection = st.sidebar.radio(
+        "Navigation",
+        ["Benchmark Analysis", "Client Demographics", "Pareto Analysis"]
+    )
+
+    with st.sidebar.expander("Database Statistics", expanded=False):
+        stats = get_database_stats()
+        if stats:
+            st.metric("Total Clients in DB", stats['total_clients'])
+            st.metric("Total Respondents in DB", stats['total_respondents'])
+            for level, count in sorted(stats['level_counts'].items()):
+                st.write(f"- {level}: **{count}** respondents")
+        else:
+            st.write("Could not retrieve stats.")
+else:
+    # This block handles the initial, unloaded state
+    st.sidebar.image("Renoir-Logo-1.png", use_container_width=True)
+    st.sidebar.header("Filters & Controls")
+    st.sidebar.info("Benchmark data not loaded. Click the button on the main page to begin.")
+    selected_company, selected_level, client_name_input, page_selection = 'All', 'All', '', "Benchmark Analysis"
 
 # Page Routing
 if st.session_state.df_benchmark is None:
@@ -527,43 +601,6 @@ else:
     if df_benchmark.empty:
          st.error("Application cannot start. Failed to load benchmark data from database.")
     else:
-        # This part is the same as your original code
-        company_list = ['All'] + sorted(df_benchmark['client_name'].unique())
-        selected_company = st.sidebar.selectbox("Benchmark Company:", company_list)
-        level_list = ['All'] + sorted(df_benchmark['level_name'].unique())
-        selected_level = st.sidebar.selectbox("Benchmark Level:", level_list)
-        
-        st.sidebar.subheader("Upload New Client Data")
-        client_name_input = st.sidebar.text_input("Enter New Client's Name:", st.session_state.get('client_name', ''))
-        uploaded_file = st.sidebar.file_uploader("Upload Client Excel File:", type=["xlsx"])
-            
-        if st.sidebar.button("Process & Generate Report", type="primary"):
-            if uploaded_file and client_name_input:
-                with st.spinner("Processing client data..."):
-                    st.session_state.client_df = process_new_client_data(uploaded_file, client_name_input)
-                    st.session_state.client_name = client_name_input
-                    if 'ai_summary' in st.session_state: del st.session_state.ai_summary
-            elif not client_name_input:
-                st.sidebar.warning("Please enter a client name.")
-            else:
-                st.sidebar.warning("Please upload a client Excel file.")
-
-        st.sidebar.markdown("---")
-        page_selection = st.sidebar.radio(
-            "Navigation",
-            ["Benchmark Analysis", "Client Demographics", "Pareto Analysis"]
-        )
-
-        with st.sidebar.expander("Database Statistics", expanded=False):
-            stats = get_database_stats()
-            if stats:
-                st.metric("Total Clients in DB", stats['total_clients'])
-                st.metric("Total Respondents in DB", stats['total_respondents'])
-                for level, count in sorted(stats['level_counts'].items()):
-                    st.write(f"- {level}: **{count}** respondents")
-            else:
-                st.write("Could not retrieve stats.")
-
         if page_selection == "Benchmark Analysis":
             render_benchmark_page(df_benchmark, selected_company, selected_level, client_name_input)
         elif page_selection == "Client Demographics":
